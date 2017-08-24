@@ -20,10 +20,14 @@ class Command(object):
         trailing_args can be either sequence or a mere string
         """
         command_str = self._command_name + ' '
-        for param, val in param_values:
+        for param, val in param_values.items():
             if not param in self._params:
                 raise Exception('Command line parameter {} is not allowed'.format(param))
-            command_str += '-{} {} '.format(param, value)
+            command_str += '-{} {} '.format(param, val)
+        for flag in flags:
+            if not flag in self._flags:
+                raise Exception('Command line flag {} is not allowed'.format(flag))
+            command_str += '-{} '.format(flag)
         command_str += ' '.join(trailing_args) if is_sequence(trailing_args) else trailing_args
         return command_str
 
