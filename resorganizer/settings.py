@@ -4,6 +4,8 @@ BIBLIOGRAPHY_REL_DIR = 'bibliography'
 LOCAL_HOST = {
     'machine_name' : None,
     'host_relative_data_path' : None,
+    'main_research_path' : None,
+    'storage_research_path' : None,
 }
 
 REMOTE_HOSTS = {

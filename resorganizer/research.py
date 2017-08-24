@@ -5,6 +5,7 @@ from datetime import datetime, date
 import resorganizer.settings as rset
 from resorganizer.aux import *
 from resorganizer.communication import *
+from resorganizer.distributed_storage import *
 
 # Create RESEARCH-ID. It is a small research which should link different local directories (with reports and time-integration) and ssh directories (with continuation, for example)
 # What is included in RESEARCH?
@@ -42,7 +43,6 @@ from resorganizer.communication import *
 #           1.3.1 copy results from remote to local
 #       1.4 as result, we will have results directly in the task directory
 
-REPORT_DIR = 'report'
 LOG_FILE = 'research.log'
 
 class Research:
@@ -50,16 +50,20 @@ class Research:
         # Always create local communication here
         # Remote communication is optional then
         self._tasks_number = 0
-        self._local_comm = LocalCommunication(Host(rset.LOCAL_HOST['host_relative_data_path'], rset.RESEARCH_REL_DIR),\
-            rset.LOCAL_HOST['machine_name'])
+        self._local_comm = LocalCommunication(Host(rset.LOCAL_HOST['host_relative_data_path'], \
+            rset.LOCAL_HOST['main_research_path']), rset.LOCAL_HOST['machine_name'])
+        self._storage_comm = LocalCommunication(Host(rset.LOCAL_HOST['host_relative_data_path'], \
+            rset.LOCAL_HOST['storage_research_path']), rset.LOCAL_HOST['machine_name'])
         self._exec_comm = comm if comm != None else self._local_comm
+        self._distr_storage = DistributedStorage((rset.LOCAL_HOST['main_research_path'], rset.LOCAL_HOST['storage_research_path']))
         suitable_name = self._make_suitable_name(name)
         if not continuing:
             # interpret name as name without date
             self._research_id = str(date.today()) + '_' + suitable_name
-            if os.path.exists(os.path.join(rset.RESEARCH_REL_DIR, self._research_id)):
-                raise ResearchAlreadyExists("Research with name '%s' already exists, choose another name" % self._research_id)
-            os.makedirs(os.path.join(rset.RESEARCH_REL_DIR, self._research_id, REPORT_DIR))
+            if self._distr_storage.get_dir_path(self._research_id) is not None:
+                raise ResearchAlreadyExists("Research with name '{}' already exists, choose another name".format(self._research_id))
+            self.research_path = self._distr_storage.make_dir(self._research_id)
+            print('Started new research at {}'.format(self.research_path))
 
             # Add to log
             log_lines = ['NEW RESEARCH: ' + str(self._research_id), '\n', comment]
@@ -67,7 +71,7 @@ class Research:
         else:
             # interpret name as the full research id
             self._research_id = suitable_name
-            self._load_research_data()
+            self.research_path = self._load_research_data()
 
     @classmethod
     def start_research(cls, name, comm=None, comment=''):
@@ -80,16 +84,18 @@ class Research:
     def _load_research_data(self):
         # find corresponding date/name
         # construct object from all data inside
-        if not os.path.exists(os.path.join(rset.RESEARCH_REL_DIR, self._research_id)):
+        research_path = self._distr_storage.get_dir_path(self._research_id)
+        if research_path is None:
             # assume date was omitted in research id
-            dir_params = find_dir_by_named_regexp(rset.RESEARCH_REL_DIR, '^(?P<year>\d+)-(?P<month>\d+)-(?P<day>\d+)_{}'.format(self._research_id))
+            research_path, dir_params = self._distr_storage.find_dir_by_named_regexp('', '^(?P<year>\d+)-(?P<month>\d+)-(?P<day>\d+)_{}'.format(self._research_id))
             if dir_params is None:
-                raise ResearchDoesNotExist("Research '%s' does not exist".format(self._research_id))
+                raise ResearchDoesNotExist("Research '{}' does not exist".format(self._research_id))
             self._research_id = '{}-{}-{}_{}'.format(dir_params['year'], dir_params['month'], dir_params['day'], self._research_id)
 
+        print('Loaded research at {}'.format(research_path))
+
         # determine maximum task number to set the number for the next possible task
-        # TODO: in backup system, this should be revised
-        dirnames = next(os.walk(os.path.join(rset.RESEARCH_REL_DIR, self._research_id)))[1]
+        dirnames, _ = self._distr_storage.listdir(self._research_id)
         self._tasks_number = 0
         for dir_ in dirnames:
             if dir_ != 'report':
@@ -97,11 +103,12 @@ class Research:
                 if task_number > self._tasks_number:
                     self._tasks_number = task_number
         self._tasks_number += 1
-        print(self._tasks_number)
+        print('Number of tasks in the current research: {}'.format(self._tasks_number))
+        return research_path
 
     def launch_task(self, task_exec, name):
         task_number = self._get_next_task_number()
-        local_task_dir = self.get_task_path(task_number, name)
+        local_task_dir = self._make_task_path(task_number, name)
         os.mkdir(local_task_dir)
         self._launch_task_impl(task_exec, task_number, task_exists=False)
         log_lines = ['\tNEW TASK: ' + str(task_number), '\n', '\t\tCommand: ' + task_exec.command, '\n']
@@ -156,9 +163,8 @@ class Research:
         return copies_list
 
     def grab_task_results(self, task_number, copies_list=[]):
-        task_name = self._get_task_name_by_number(task_number)
-        task_results_local_path = self.get_task_path(task_number, task_name)
-        task_results_remote_path = self.get_task_path(task_number, task_name, self._exec_comm.host)
+        task_results_local_path = self.get_task_path(task_number)
+        task_results_remote_path = self.get_task_path(task_number, self._exec_comm.host)
         if len(copies_list) == 0: # copy all data
             pathes = self._exec_comm.listdir(task_results_remote_path)
             for file_or_dir in pathes:
@@ -196,19 +202,27 @@ class Research:
         pass
 
     def write_log(self, lines, new_research = False):
-        f = open(os.path.join(rset.RESEARCH_REL_DIR, LOG_FILE), 'a')
+        f = open(os.path.join(rset.LOCAL_HOST['main_research_path'], LOG_FILE), 'a')
         dt_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         if not new_research:
             dt_str += ', RESEARCH-ID: ' + self._research_id
         f.writelines([dt_str, '\n'] + lines + ['\n\n'])
 
-    def get_task_path(self, task_number, task_name=None, execution_host=None):
-        if task_name is None:
-            task_name = self._get_task_name_by_number(task_number)
+    def _make_task_path(self, task_number, task_name, execution_host=None):
         task_path = ''
         rel_task_dir = os.path.join(self._research_id, self._get_task_full_name(task_number, task_name))
         if execution_host is None:
-            task_path = os.path.join(rset.RESEARCH_REL_DIR, rel_task_dir)
+            task_path = os.path.join(rset.LOCAL_HOST['main_research_path'], rel_task_dir)
+        else:
+            task_path = os.path.join(execution_host.research_abs_path, rel_task_dir)
+        return task_path
+
+    def get_task_path(self, task_number, execution_host=None):
+        task_path = ''
+        task_name = self._get_task_name_by_number(task_number)
+        rel_task_dir = os.path.join(self._research_id, self._get_task_full_name(task_number, task_name))
+        if execution_host is None:
+            task_path = self._distr_storage.get_dir_path(rel_task_dir)
         else:
             task_path = os.path.join(execution_host.research_abs_path, rel_task_dir)
         return task_path
@@ -243,11 +257,10 @@ class Research:
         return str(task_number) + '-' + self._make_suitable_name(task_name)
 
     def _get_task_name_by_number(self, task_number):
-        dir_params = find_dir_by_named_regexp(os.path.join(rset.RESEARCH_REL_DIR, self._research_id), \
-            '^{}-(?P<task_name>\S+)'.format(task_number))
-        if dir_params is None:
+        find_data = self._distr_storage.find_dir_by_named_regexp(self._research_id, '^{}-(?P<task_name>\S+)'.format(task_number))
+        if find_data is None:
             raise Exception("No task with number '{}' is found".format(task_number))
-        return dir_params['task_name']
+        return find_data[1]['task_name']
 
     def _split_task_dir(self, task_dir):
         parsing_params = parse_by_named_regexp('^(?P<task_number>\d+)-(?P<task_name>\S+)', task_dir)
@@ -266,7 +279,7 @@ class Research:
         return path
 
     def _get_local_research_path(self):
-        return os.path.join(rset.RESEARCH_REL_DIR, self._research_id)
+        return os.path.join(rset.LOCAL_HOST['main_research_path'], self._research_id)
 
     def _move_task_data(self, copies_list, task_dir):
         for copy_target in copies_list:
@@ -282,7 +295,7 @@ class ResearchDoesNotExist(Exception):
     pass
 
 def get_all_research_ids():
-    return os.listdir('.%s' % rset.RESEARCH_REL_DIR)
+    return os.listdir('.' + rset.LOCAL_HOST['main_research_path'])
 
 def retrieve_trailing_float_from_task_dir(task_dir):
     matching = re.search('^(?P<task_number>\d+)-(?P<task_name>\S+)_(?P<float_left>\d+)\.(?P<float_right>\d+)', task_dir)
