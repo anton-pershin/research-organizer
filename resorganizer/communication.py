@@ -10,15 +10,23 @@ from resorganizer.aux import *
 
 paramiko.util.log_to_file("paramiko.log")
 
-class Host(object): # have to inherit object to make it new-style class (otherwise super() won't work)
-    def __init__(self, host_relative_data_path, research_absolute_path=rser.RESEARCH_REL_DIR):
+class Host(object):
+    """Host is the structure storing all necessary information about the host of execution, namely:
+    (1) host-relative data path which defines the path to the host-specific data (e.g. compiled programs) 
+    (2) research absolute path
+    """
+    def __init__(self, host_relative_data_path, research_absolute_path):
         self.research_abs_path = research_absolute_path 
         self.host_relative_data_path = host_relative_data_path
 
     def get_path_to_host_relative_data(self, name):
+        """Returns the path to the data specified by name on the given host 
+        """
         return '/'.join((self.host_relative_data_path, name))
 
 class RemoteHost(Host):
+    """RemoteHost extends Host including information about ssh host and the number of cores.
+    """
     def __init__(self, ssh_host, cores, host_relative_data_path, research_absolute_path):
         self.ssh_host = ssh_host
         self.cores = cores
@@ -32,14 +40,19 @@ def enable_sftp(func):
     return wrapped_func
 
 class BaseCommunication(object):
-    """Abstract class of communication is used to implement the simplest access to a machine.
-    A concrete class ought to use a concrete method of communication (e.g., ssh, API) 
-    allowing to access filesystem and sort of command line.
-    Two types of files exchange are possible:
-    (1) between a local machine (at which this script is running)
-    and a remote machine (with which the communication is established),
-    (2) within a remote machine.
-    Since for now only copying implies this division, we introduce so called modes: from_local, to_local and all_remote 
+    """BaseCommunication is an abstract class which can be used to implement the simplest access to a machine.
+    A concrete class ought to use a concrete method of communication (e.g., OS API or ssh) allowing to access 
+    the filesystem (copy and remove files) and execute a command line on the machine.
+
+    Since a machine can be, in particular, the local machine, and at the same time we must always establish the communication between
+    the local machine and a machine being communicated, we have to sort the terminology out. We shall call the latter a communicated 
+    machine whilst the former remain the local machine.
+
+    Generally, two types of files exchange are possible:
+    (1) between the local machine and a communicated machine,
+    (2) within a communicated machine.
+    Since for now only copying implies this division, we introduce so called 'modes of copying': from_local, to_local 
+    and all_on_communicated
     """
 
     def __init__(self, host, machine_name):
@@ -50,15 +63,21 @@ class BaseCommunication(object):
         raise NotImplementedError('This function is not implemented')
 
     def copy(self, from_, to_, mode='from_local'):
-        """Possible modes:
-        (1) default -> from local path to remote path
-        (2) all_remote -> from remote path to remote path
-        (3) all_local -> from local path to local path
-        (4) from_remote -> from local path to local path
+        """Copies from_ to to_ which are interpreted according to mode:
+        (1) from_local (default) -> from_ is local path, to_ is a path on a communicated machine
+        (2) to_local -> from_ is a path on a communicated machine, to_ local path
+        (3) all_on_communicated -> from_ and to_ are paths on a communicated machine
+
+        from_ and to_ can be dirs or files according to the following combinations:
+        (1) from_ is dir, to_ is dir
+        (2) from_ is file, to_ is dir
+        (3) from_ is file, to_ is file
         """
         raise NotImplementedError('This function is not implemented')
 
     def rm(self, target):
+        """Removes target which can be a dir or file
+        """
         raise NotImplementedError('This function is not implemented')
 
     def _print_copy_msg(self, from_, to_):

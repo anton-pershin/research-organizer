@@ -23,7 +23,7 @@ host_id = None
 ssh_host = rset.REMOTE_HOSTS[host_id]['ssh_host']
 username = rset.REMOTE_HOSTS[host_id]['username']
 pswd = rset.REMOTE_HOSTS[host_id]['password']
-host_rel_data_path = rset.REMOTE_HOSTS[host_id]['host_rel_data_path']
+host_rel_data_path = rset.REMOTE_HOSTS[host_id]['host_relative_data_path']
 res_path = rset.REMOTE_HOSTS[host_id]['research_path']
 cores = rset.REMOTE_HOSTS[host_id]['cores']
 

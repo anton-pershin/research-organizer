@@ -3,7 +3,21 @@ from resorganizer.aux import append_code, get_templates_path, create_file_mkdir
 import os
 
 class TaskExecution(object):
-    """Any TaskExecution must finally produce a single command to be executed and a list of copies
+    """TaskExecution describes how Task should be executed. In fact, there are only three steps:
+    (1) copy all the data except host-relative to the dir of execution
+    (2) copy all the host-relative data to the dir of execution
+    (3) execute the command
+
+    The list of paths for (1) is defined by copies_list in TaskExecution. The list of names for (2)
+    is defined by host_relative_copies_list. Note that only one command must be executed whereas Task
+    can contain several of them (that is called multiple task). To handle this, TaskExecution offers three
+    strategies of execution:
+    (1) alone task execution
+    (2) plural task execution (i.e. parallel run of the commands of a multiple task)
+    (3) chain task execution (i.e. serial run of the commands of a multiple task)
+
+    It is a deal of a conrete implementation how plural task execution and chain task execution are implemented,
+    but in the end, there must be a single command in self.command to be executed.
     """
     def __init__(self):
         self.command = None
@@ -26,15 +40,28 @@ class TaskExecution(object):
             self.host_relative_copies_list.append(task.program)
 
 class DirectExecution(TaskExecution):
+    """DirectExecution implements an execution via OS-native API
+    """
     def __init__(self):
         super(DirectExecution, self).__init__()
 
     def set_alone_task(self, task):
         sid, self.command = next(task.command_gen())
-        self.command = './' + self.command
         self.copies_list = task.inputs
 
 class SgeExecution(TaskExecution):
+    """SgeExecution implements an execution via SGE.
+
+    It builds sge-scripts containing the real command and creates the commands line
+    via qsub. 
+
+    Plural task execution is implemented via a separate python script which is called
+    a handler. It controls the SGE queue and qsubs sge-scripts such that the queue 
+    never overflows with tasks.
+
+    Chain task execution is implemented via a sequence of sge-scripts each of which qsubs
+    the next sge-script in the sequence making, therefore, a chain.
+    """
     def __init__(self):
         super(SgeExecution, self).__init__()
 

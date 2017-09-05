@@ -46,14 +46,46 @@ from resorganizer.distributed_storage import *
 LOG_FILE = 'research.log'
 
 class Research:
+    """Research is the main class for interacting with the hierarchy of tasks.
+
+    It allows to:
+    (1) find location of a task by its number
+    (2) store/load object into/from a task's dir
+    (3) create new tasks by launching TaskExecution locally or on remotes
+    (4) launch TaskExecution in already existing task's directory
+    (5) grab task's content from remotes
+
+    The main idea behind Research is that we collect tasks in the research's dir and make 
+    them enumerated. Each task is completely identified by its number. Its content, in turn,
+    is located in the task's dir which is made up by concatenation of the number and the task's
+    name that must be specified by a user. Next, we distinguish two logical places where tasks
+    are collected: local one and remote one. Both places are distributed, but in a different 
+    manner: the local place is distributed over the locally accesible space on the current machine 
+    (say, some tasks may be located in dir path/to/storage and another tasks in another_path/to/storage)
+    whereas the remote place is distributed over different machines. For the local place, we use DistributedStorage
+    class to access the data. The remote place is accessed by setting a necessary SshCommunication in the Research
+    class constructor. To avoid the mess in directories, we assume the following rules: 
+    (1) intersection between tasks' dirs of the same research dir on different location on the local machine is empty
+    (2) all tasks are presented locally (in any location defined in DistributedStorage) at least as empty dirs
+    (3) intersection between tasks' dirs of the same research dir on different remotes is empty
+    (4) union of them
+
+    Therefore, all tasks located remotely must map to the local machine (but it is not true for an opposite case!).
+    Hence, when the task intended to be executed on a remote is created, we create both a remote directory and a local 
+    directory for this task. To be consistent in creating tasks locally, we choose a main (master) directory
+    in DistributedStorage in which we create by default tasks directories whereas other local directories are assumed 
+    to be for storing purposes.
+
+    The instance of Research is created by passing to it BaseCommunication object. If the instance is intended to launch
+    tasks on remotes or grab tasks from remotes, then the corresponding BaseCommunication for interaction must be passed.
+    By default, LocalCommunication is used and the remote interaction is thus disabled.
+    """
     def __init__(self, name, comm=None, continuing=False, comment=''):
         # Always create local communication here
         # Remote communication is optional then
         self._tasks_number = 0
         self._local_comm = LocalCommunication(Host(rset.LOCAL_HOST['host_relative_data_path'], \
             rset.LOCAL_HOST['main_research_path']), rset.LOCAL_HOST['machine_name'])
-        self._storage_comm = LocalCommunication(Host(rset.LOCAL_HOST['host_relative_data_path'], \
-            rset.LOCAL_HOST['storage_research_path']), rset.LOCAL_HOST['machine_name'])
         self._exec_comm = comm if comm != None else self._local_comm
         self._distr_storage = DistributedStorage((rset.LOCAL_HOST['main_research_path'], rset.LOCAL_HOST['storage_research_path']))
         suitable_name = self._make_suitable_name(name)
@@ -107,6 +139,8 @@ class Research:
         return research_path
 
     def launch_task(self, task_exec, name):
+        """Creates a new task, copies necessary data and executes the command line
+        """
         task_number = self._get_next_task_number()
         local_task_dir = self._make_task_path(task_number, name)
         os.mkdir(local_task_dir)
@@ -116,6 +150,8 @@ class Research:
         return task_number
 
     def launch_task_on_existing(self, task_exec, task_number):
+        """Copies necessary data and executes the command line in already created task
+        """
         self._launch_task_impl(task_exec, task_number, task_exists=True)
 
     def _launch_task_impl(self, task_exec, task_number, task_exists=False):
@@ -163,6 +199,9 @@ class Research:
         return copies_list
 
     def grab_task_results(self, task_number, copies_list=[]):
+        """Moves task content from the remote to the local. Locally, the task content will appear in the task
+        dir located in the master research location.
+        """
         task_results_local_path = self.get_task_path(task_number)
         task_results_remote_path = self.get_task_path(task_number, self._exec_comm.host)
         if len(copies_list) == 0: # copy all data
@@ -186,11 +225,18 @@ class Research:
             else:
                 os.remove(full_target_path)
 
-    def call_on_each(self, task_number, copies_list, percopy_func):
+    def call_on_each_gen(self, task_number, copies_list, percopy_func):
+        """For each item in copies_list, copies it from the task dir corresponding to task_number on the remote to the local dir, 
+        executes percopy_func upon it and removes it. It is useful when you don't want to copy all the task content from the 
+        remote at once, but still need to process some of the content in a lazy manner.
+        """
         for copy_target in copies_list:
             yield self.call_on_lazy_remote_data(task_number, copy_target, percopy_func)
 
     def call_on_lazy_remote_data(self, task_number, copy_target, func):
+        """Copies copy_target from the task dir corresponding to task_number on the remote to the local dir, executes 
+        func upon it and then removes it.
+        """
         self.grab_task_results(task_number, (copy_target,))
         actual_copy = copy_target['new_name'] if 'new_name' in copy_target else os.path.basename(copy_target['path'])
         print('Calling on ' + actual_copy)
@@ -218,6 +264,9 @@ class Research:
         return task_path
 
     def get_task_path(self, task_number, execution_host=None):
+        """Returns the task dir corresponding to task_number. By default, the local dir (from DistrubutedStorage) is returned.
+        If execution_host is specified, then the remote dir will be returned.
+        """
         task_path = ''
         task_name = self._get_task_name_by_number(task_number)
         rel_task_dir = os.path.join(self._research_id, self._get_task_full_name(task_number, task_name))
@@ -228,12 +277,18 @@ class Research:
         return task_path
 
     def dump_object(self, task_number, obj, obj_name):
+        """Dumps obj into the file whose name is obj_name + '.pyo' and locates it into the task dir corresponding to
+        task_number
+        """
         print('Dumping ' + obj_name)
         f = open(os.path.join(self.get_task_path(task_number), obj_name + '.pyo'),'w')
         pickle.dump(obj, f)
         f.close()
 
     def load_object(self, task_number, obj_name):
+        """Load an object dumped into the file whose name is obj_name + '.pyo' and which is located it into the task dir 
+        corresponding to task_number
+        """
         print('Loading ' + obj_name)
         f = open(os.path.join(self.get_task_path(task_number), obj_name + '.pyo'),'r')
         obj = pickle.load(f)

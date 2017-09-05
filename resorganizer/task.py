@@ -1,25 +1,24 @@
 from resorganizer.aux import *
 
-# All possible combinations:
-# (1) single program, single command, single data
-# (2) single program, multiple command, single data
-# (3) single program, single command, multiple data
-# (4) single program, multiple command, multiple data
-# Multiple programs imply, in general, multiple commands and multiple data, so we omit this case
-# All four cases can be implemented within just one class. However, this class must provide an information about
-# its inner multiplicity in order for an executor to check availability of parallel or chain execution
-
 class Command(object):
-    def __init__(self, command_name, params={}, flags=()):
-        self._command_name = command_name
+    """Command is an abstraction for any command line able to be executed. Command line has the components: 
+    program name, params (flags followed by some values, e.g. -f filename), flags (alone flags. e.g. -f)
+    and trailing arguments. Some of these may be optional. We create Command by passing the program name and
+    all eligible names for params and flags. When we need to produce a particular command line, we substitute
+    necessary ones via substitute() which returns a complete string for execution.
+
+    Note that params and flags are implied to be prepended by a single minus, so you need to pass only their names.
+    """
+    def __init__(self, program_name, params=(), flags=()):
+        self._program_name = program_name
         self._params = params
         self._flags = flags
 
     def substitute(self, param_values={}, flags=(), trailing_args=''):
+        """Produces command line from params_values (a dictionary for valued flags), flags (if they are allowed, 
+        otherwise throws an exception) and trailing_args (trailing arguments) which can be either sequence or a mere string.
         """
-        trailing_args can be either sequence or a mere string
-        """
-        command_str = self._command_name + ' '
+        command_str = self._program_name + ' '
         for param, val in param_values.items():
             if not param in self._params:
                 raise Exception('Command line parameter {} is not allowed'.format(param))
@@ -32,7 +31,20 @@ class Command(object):
         return command_str
 
 class Task(object):
-    """Program is set only if it is intended to be copied from somewhere. So it is not set for global ones.
+    """Task consists of a Command object, substitutions for the command and inputs which are files intended
+    to be moved. Each substitution consists of params, flags, trailing arguments and a substitution identifier.
+    After these being set, Task acts as a generator via method command_gen which yields a sid and a command string
+    for a subsequent substitution.
+
+    Using this class, you can generate command lines of three types:  
+    (1) single program, single command params/flags, single data
+    (2) single program, multiple command params/flags, single data
+    (3) single program, single command params/flags, multiple data
+    (4) single program, multiple command params/flags, multiple data
+    
+    Here we call (1) an alone task and (2), (3), (4) a multiple task. Multiple tasks can be executed in various ways,
+    but this is a business of TaskExecution.     
+    Multiple programs tasks are, in turn, implemented as a combination of several Task.
     """
     def __init__(self, cmd, prog=''):
         self.program = prog
@@ -44,14 +56,21 @@ class Task(object):
         self.sids = []
 
     def set_input(self, input_):
+        """Adds inputs into task.
+        """
         self.inputs.append(input_)
 
     def set_substitution(self, sid, params={}, flags=(), trailing_args=''):
+        """Adds a substitution specified by sid (substitution identifier), params, flags and trailing arguments into task.
+        The latter can be either a string or a sequence.
+        """
         self.sids.append(sid)
         self.params_subst.append(params)
         self.flags_subst.append(flags)
         self.trailing_args_subst.append(trailing_args)
 
     def command_gen(self):
+        """Yields a substitution.
+        """
         for sid, params_subst, flags_subst, trailing_args_subst in zip(self.sids, self.params_subst, self.flags_subst, self.trailing_args_subst):
             yield (sid, self.command.substitute(params_subst, flags_subst, trailing_args_subst))
