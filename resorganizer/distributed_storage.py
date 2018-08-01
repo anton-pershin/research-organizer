@@ -18,14 +18,15 @@ class DistributedStorage:
         """
         Returns the full path to dir_ or None if dir_ is absent.
         """
-        return self.lookup_through_dir(dir_, \
-            lambda dir_path: (dir_path, dir_path) if os.path.exists(dir_path) else None)[0]
+        dir_path_tuple = self.lookup_through_dir(dir_, \
+            lambda dir_path: (dir_path, dir_path) if os.path.exists(dir_path) else None)
+        return dir_path_tuple[0] if dir_path_tuple is not None else None
 
     def make_dir(self, dir_):
         """
         Creates dir_ in prior storage. Returns the full path to it.
         """
-        path_ = os.path.join(self.storage_paths[self.prior_storage_index], dir_),
+        path_ = os.path.join(self.storage_paths[self.prior_storage_index], dir_)
         os.makedirs(path_)
         return path_
 
@@ -45,15 +46,16 @@ class DistributedStorage:
         prior_found = False
         for path_i in range(len(possible_paths)):
             path_ = possible_paths[path_i]
-            tmp_found_data = lookup_func(os.path.join(possible_paths[path_i]))
-            if tmp_found_data is not None:
-                tmp_found_path = os.path.join(possible_paths[path_i], tmp_found_data[0])
-                if found_data is not None:
-                    print("Duplicate distributed dir is found: '{}' and '{}'".format(tmp_found_path, found_data[0]))
-                if not prior_found:
-                    found_data = (tmp_found_path, tmp_found_data[1])
-                if path_i == self.prior_storage_index:
-                    prior_found = True
+            if os.path.exists(possible_paths[path_i]):
+                tmp_found_data = lookup_func(possible_paths[path_i])
+                if tmp_found_data is not None:
+                    tmp_found_path = os.path.join(possible_paths[path_i], tmp_found_data[0])
+                    if found_data is not None:
+                        print("Duplicate distributed dir is found: '{}' and '{}'".format(tmp_found_path, found_data[0]))
+                    if not prior_found:
+                        found_data = (tmp_found_path, tmp_found_data[1])
+                    if path_i == self.prior_storage_index:
+                        prior_found = True
         return found_data
 
     def listdir(self, dir_):
@@ -64,7 +66,8 @@ class DistributedStorage:
         dirnames = []
         filenames = []
         for storage_path in self.storage_paths:
-            _, dirnames_, filenames_ = next(os.walk(os.path.join(storage_path, dir_)))
-            dirnames += dirnames_
-            filenames += filenames_
+            if os.path.exists(os.path.join(storage_path, dir_)):
+                _, dirnames_, filenames_ = next(os.walk(os.path.join(storage_path, dir_)))
+                dirnames += dirnames_
+                filenames += filenames_
         return dirnames, filenames

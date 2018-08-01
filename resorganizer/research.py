@@ -87,7 +87,7 @@ class Research:
         self._local_comm = LocalCommunication(Host(rset.LOCAL_HOST['host_relative_data_path'], \
             rset.LOCAL_HOST['main_research_path']), rset.LOCAL_HOST['machine_name'])
         self._exec_comm = comm if comm != None else self._local_comm
-        self._distr_storage = DistributedStorage((rset.LOCAL_HOST['main_research_path'], rset.LOCAL_HOST['storage_research_path']))
+        self._distr_storage = DistributedStorage((rset.LOCAL_HOST['main_research_path'], rset.LOCAL_HOST['storage_research_path']), prior_storage_index=1)
         suitable_name = self._make_suitable_name(name)
         if not continuing:
             # interpret name as name without date
@@ -145,7 +145,10 @@ class Research:
         local_task_dir = self._make_task_path(task_number, name)
         os.mkdir(local_task_dir)
         self._launch_task_impl(task_exec, task_number, task_exists=False)
-        log_lines = ['\tNEW TASK: ' + str(task_number), '\n', '\t\tCommand: ' + task_exec.command, '\n']
+        if task_exec.command is not None:
+            log_lines = ['\tNEW TASK: ' + str(task_number), '\n', '\t\tCommand: ' + task_exec.command, '\n']
+        else:
+            log_lines = ['\tNEW TASK: ' + str(task_number), '\n']
         self.write_log(log_lines)
         return task_number
 
@@ -173,7 +176,13 @@ class Research:
 
         copies_list = self._build_copies_list_with_modes(task_exec)
         do_atomic(partial(copy_task_data, copies_list), remove_task_data)
-        if task_exec.command != '':
+        if task_exec.command is None: # execute python function
+            if task_exec.pyfunc is not None:
+                do_atomic(partial(task_exec.pyfunc, local_task_dir), remove_task_data)
+            else:
+                print('Cannot execute pyfunc')
+                remove_task_data()
+        elif task_exec.command != '':
             # to treat arguments of command properly, we need to go to the task directory
             full_command = 'cd ' + working_task_dir + ';'
             if not task_exec.is_global_command:
@@ -182,6 +191,9 @@ class Research:
             #full_command = working_task_dir + '/' + task.command if is_remote_execution else os.path.join(working_task_dir, task.command)
             #self.__communication.execute(full_command, is_remote=is_remote_execution)
             do_atomic(partial(self._exec_comm.execute, full_command), remove_task_data)
+        else:
+            print('Cannot execute pyfunc')
+            remove_task_data()
 
     def _build_copies_list_with_modes(self, task_exec):
         is_remote_execution = self._local_comm is not self._exec_comm

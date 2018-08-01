@@ -30,8 +30,8 @@ class Command(object):
         command_str += ' '.join(trailing_args) if is_sequence(trailing_args) else trailing_args
         return command_str
 
-class Task(object):
-    """Task consists of a Command object, substitutions for the command and inputs which are files intended
+class CommandTask(object):
+    """CommandTask consists of a Command object, substitutions for the command and inputs which are files intended
     to be moved. Each substitution consists of params, flags, trailing arguments and a substitution identifier.
     After these being set, Task acts as a generator via method command_gen which yields a sid and a command string
     for a subsequent substitution.
@@ -44,7 +44,7 @@ class Task(object):
     
     Here we call (1) an alone task and (2), (3), (4) a multiple task. Multiple tasks can be executed in various ways,
     but this is a business of TaskExecution.     
-    Multiple programs tasks are, in turn, implemented as a combination of several Task.
+    Multiple programs tasks are, in turn, implemented as a combination of several CommandTask.
     """
     def __init__(self, cmd, prog=''):
         self.program = prog
@@ -56,7 +56,7 @@ class Task(object):
         self.sids = []
 
     def set_input(self, input_):
-        """Adds inputs into task.
+        """Adds one input into task.
         """
         self.inputs.append(input_)
 
@@ -74,3 +74,17 @@ class Task(object):
         """
         for sid, params_subst, flags_subst, trailing_args_subst in zip(self.sids, self.params_subst, self.flags_subst, self.trailing_args_subst):
             yield (sid, self.command.substitute(params_subst, flags_subst, trailing_args_subst))
+
+class PythonTask(object):
+    """PythonTask essentially executes a python function and specify data to be copied. It allows to automate some of the routines
+    emerging while working with other heavier tasks. Even though the extension to "single function - multiple data" 
+    idealogy is possible, it has not yet done due to lack of demand.
+    """
+    def __init__(self, func):
+        self.func = func
+        self.inputs = []
+
+    def set_input(self, input_):
+        """Adds one input into task.
+        """
+        self.inputs.append(input_)

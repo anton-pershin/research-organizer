@@ -3,7 +3,8 @@ from resorganizer.aux import append_code, get_templates_path, create_file_mkdir
 import os
 
 class TaskExecution(object):
-    """TaskExecution describes how Task should be executed. In fact, there are only three steps:
+    """TaskExecution describes how CommandTask (and PythonTask, but it is too trivial, so the case of CommandTask 
+    is discussed hereafter) should be executed. In fact, there are only three steps:
     (1) copy all the data except host-relative to the dir of execution
     (2) copy all the host-relative data to the dir of execution
     (3) execute the command
@@ -15,16 +16,23 @@ class TaskExecution(object):
     (1) alone task execution
     (2) plural task execution (i.e. parallel run of the commands of a multiple task)
     (3) chain task execution (i.e. serial run of the commands of a multiple task)
+    and a separate case for python task:
+    (4) python task execution
 
     It is a deal of a conrete implementation how plural task execution and chain task execution are implemented,
     but in the end, there must be a single command in self.command to be executed.
     """
     def __init__(self):
+        self.pyfunc = None
         self.command = None
         self.copies_list = []
         self.host_relative_copies_list = []
         self.is_global_command = False
         append_code(self, ('set_alone_task', 'set_plural_task', 'set_chain_task'), self._add_program)
+
+    def set_python_task(self, pytask):
+        self.copies_list = pytask.inputs
+        self.pyfunc = pytask.func
 
     def set_alone_task(self, task):
         raise NotImplementedError()
@@ -93,7 +101,7 @@ class SgeExecution(TaskExecution):
 
         # prepare py-handler
         handler_templ_file = open(os.path.join(get_templates_path(), 'plural_task_handler.py'), 'r')
-        rendered_data = Template(handler_templ_file.read()).render(max_sge_tasks_in_queue=20, sleeping_time_sec=600, sges=sges)
+        rendered_data = Template(handler_templ_file.read()).render(max_sge_tasks_in_queue=40, sleeping_time_sec=600, sges=sges)
         handler_script_filename = 'handler.py'
         handler_script_path = os.path.join('tmp', handler_script_filename)
         handler_script_file = create_file_mkdir(handler_script_path)
